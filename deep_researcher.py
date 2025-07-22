@@ -797,8 +797,11 @@ class DeepResearchTeam:
                         researcher_id=researcher.name,
                         iterations_used=researcher_state.tool_call_iterations
                     )
-                        
-                    return result
+                    
+                    # 🔄 즉시 개별 압축 수행 (open_deep_research 방식)
+                    compressed_result = await self._compress_individual_research(result)
+                    
+                    return compressed_result
                     
                 except TokenLimitError as e:
                     logging.error(f"Token limit in research: {e}")
@@ -849,7 +852,7 @@ class DeepResearchTeam:
             
             response = await researcher.on_messages(messages, None)
             
-            return ResearchResult(
+            result = ResearchResult(
                 topic=task.topic,
                 findings=response.chat_message.content if response.chat_message else "",
                 sources=[],
@@ -859,9 +862,66 @@ class DeepResearchTeam:
                 iterations_used=1
             )
             
+            # 축소된 컨텍스트 결과도 압축
+            compressed_result = await self._compress_individual_research(result)
+            return compressed_result
+            
         except Exception as e:
             logging.error(f"Failed even with reduced context: {e}")
             return None
+    
+    async def _compress_individual_research(self, result: ResearchResult) -> ResearchResult:
+        """개별 연구 결과를 즉시 압축합니다 (open_deep_research 방식)"""
+        try:
+            # 원본 결과가 이미 짧으면 압축 생략
+            if len(result.findings) < 1000:
+                logging.info(f"연구 결과가 짧아 압축 생략: {result.topic[:50]}...")
+                return result
+            
+            # 개별 압축 프롬프트
+            compression_prompt = f"""다음 연구 결과를 간결하고 핵심적인 내용으로 압축하세요:
+
+주제: {result.topic}
+
+연구 결과:
+{result.findings}
+
+다음 지침을 따라 압축하세요:
+1. 핵심 사실과 통찰력만 보존
+2. 중요한 데이터와 통계 유지
+3. 소스 정보 보존
+4. 불필요한 반복 제거
+5. 1/3 길이로 압축하되 핵심 내용 손실 없이
+
+압축된 요약을 제공하세요:"""
+
+            messages = [
+                TextMessage(content=compression_prompt, source="system")
+            ]
+            
+            # 압축 에이전트 사용
+            response = await self.compression_agent.on_messages(messages, None)
+            compressed_findings = response.chat_message.content if response.chat_message else result.findings
+            
+            # 압축된 결과로 업데이트
+            compressed_result = ResearchResult(
+                topic=result.topic,
+                findings=compressed_findings,
+                sources=result.sources,
+                raw_notes=[],  # 압축 후 raw_notes 제거로 메모리 절약
+                confidence=result.confidence,
+                researcher_id=result.researcher_id,
+                iterations_used=result.iterations_used
+            )
+            
+            logging.info(f"✅ 개별 압축 완료: {result.topic[:50]}... ({len(result.findings)} -> {len(compressed_findings)} chars)")
+            return compressed_result
+            
+        except Exception as e:
+            logging.warning(f"개별 압축 실패, 원본 사용: {e}")
+            # 압축 실패 시 원본 반환 (단, raw_notes는 메모리 절약을 위해 제거)
+            result.raw_notes = []
+            return result
         
     async def _is_research_sufficient(self, 
                                     state: ResearchState,
@@ -1011,40 +1071,37 @@ class DeepResearchTeam:
         return aggregate_info + "\n".join(summary_parts)
         
     async def _compress_research(self, state: ResearchState) -> CompressedResearch:
-        # 연구 결과 압축 - 모든 연구 결과를 요약하고 정리
-        """표준 압축을 사용하여 모든 연구 결과를 압축합니다"""
-        logging.info("표준 압축 시스템 사용")
-        # 모든 연구 결과 병합
+        # 🔄 개별 압축된 결과들을 통합하는 최종 압축 (open_deep_research 방식)
+        """개별 압축된 연구 결과들을 통합하고 종합합니다"""
+        logging.info(f"🔄 개별 압축된 {len(state.research_results)}개 결과 통합 중...")
+        
+        # 이미 개별 압축된 결과들이므로 토큰 한계 위험 낮음
         merged_data = merge_research_results(state.research_results)
         
-        # 압축을 위한 결과 포맷팅
+        # 개별 압축된 결과들을 통합하는 프롬프트
         findings_text = "\n\n".join([
-            f"주제: {r.topic}\n결과: {r.findings}\n"
+            f"주제: {r.topic}\n압축된 결과: {r.findings}\n연구자: {r.researcher_id}\n"
             for r in state.research_results
         ])
         
-        # 토큰 한계 확인
-        estimated_tokens = estimate_tokens(findings_text)
-        max_tokens = get_model_token_limit(self.config.compression_model.model_name)
-        
-        if max_tokens and estimated_tokens > max_tokens * 0.8:
-            # 청크로 나누어 별도 압축
-            findings_text = await self._chunk_compress_findings(state.research_results)
-        
-        compression_prompt = f"""
-다음 연구 결과들을 일관된 요약으로 압축하고 종합하세요:
+        # 통합 압축 프롬프트
+        integration_prompt = f"""다음은 각 연구자가 개별적으로 압축한 연구 결과들입니다. 
+이들을 하나의 일관된 종합 요약으로 통합하세요:
 
 {findings_text}
 
-다음을 포함하는 포괄적인 요약을 생성하세요:
-1. 핵심 주제와 패턴 식별
-2. 가장 중요한 결과 강조
-3. 사실적 정확성 유지
-4. 소스 귀속 보존
-"""
+통합 시 다음을 수행하세요:
+1. 🔍 중복된 정보 식별 및 제거
+2. 📊 상호 보완적인 내용 연결
+3. 🎯 핵심 패턴과 트렌드 식별  
+4. ⚖️ 상충되는 정보가 있다면 균형잡힌 제시
+5. 💎 가장 중요한 통찰력 강조
+6. 🔗 소스 정보 보존
+
+개별 압축본들을 하나의 통합된 연구 요약으로 종합하세요:"""
         
         messages = [
-            TextMessage(content=compression_prompt, source="system")
+            TextMessage(content=integration_prompt, source="system")
         ]
         
         response = await self.compression_agent.on_messages(messages, None)
@@ -1052,11 +1109,12 @@ class DeepResearchTeam:
         compressed = CompressedResearch(
             summary=response.chat_message.content,
             key_findings=merged_data["topics"][:10],  # 상위 10개 주제
-            methodology="교차 검증을 통한 다중 에이전트 병렬 연구",
+            methodology="개별 압축 + 통합 압축을 통한 다중 에이전트 병렬 연구",
             combined_sources=merged_data["all_sources"][:20],  # 상위 20개 소스
             topics_covered=merged_data["topics"]
         )
         
+        logging.info("✅ 개별 압축 결과 통합 완료")
         return compressed
         
     async def _chunk_compress_findings(self, results: List[ResearchResult]) -> str:
