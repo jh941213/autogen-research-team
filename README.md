@@ -1,8 +1,10 @@
 # AutoGen Open Deep Research 시스템
 
-**Microsoft AutoGen 프레임워크**를 기반으로 한 향상된 심층 연구 시스템입니다. LangGraph의 state machine 패턴을 AutoGen의 **Teams**와 **Agent** 패턴으로 변환하여, 다중 에이전트 협업을 통한 포괄적이고 체계적인 연구를 수행합니다.
+**[Microsoft AutoGen 프레임워크](https://github.com/microsoft/autogen)**를 기반으로 한 향상된 심층 연구 시스템입니다. LangGraph의 state machine 패턴을 AutoGen의 **Teams**와 **Agent** 패턴으로 변환하여, 다중 에이전트 협업을 통한 포괄적이고 체계적인 연구를 수행합니다.
 
-## ✨ **최신 업데이트** (v2.0)
+> **📢 v2.1 업데이트 예정**: AutoGen **GraphFlow**를 적용한 고급 워크플로우 라우팅 시스템 구현 예정입니다. 현재는 기본 Agent 패턴과 FunctionTool 기반으로 구현되어 있습니다.
+
+## ✨ **최신 업데이트** ([v2.0](https://github.com/jh941213/autogen-research-team/releases/tag/v2.0))
 
 🧠 **AI 기반 지능적 작업 분해** - open_deep_research 방식 통합  
 ⚡ **자동 오류 처리** - Azure 콘텐츠 필터, 토큰 한계 등  
