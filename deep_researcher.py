@@ -182,9 +182,8 @@ class SupervisorAgent(AssistantAgent):
     async def create_research_tasks(self, research_brief: str, num_units: int) -> List[ResearchTask]:
         """
         연구 브리프로부터 연구 작업들을 생성합니다.
-        open_deep_research 방식의 지능적 작업 분해를 기존 구조에 적용합니다.
         """
-        # 시스템 프롬프트 - open_deep_research의 lead_researcher_prompt 스타일 적용
+
         system_prompt = f"""당신은 수석 연구원으로서 연구 프로젝트를 계획하고 관리하는 역할을 합니다.
 
 주어진 연구 브리프를 분석하여 최대 {num_units}개의 독립적이고 병렬 수행 가능한 연구 작업으로 분해해야 합니다.
@@ -211,14 +210,15 @@ class SupervisorAgent(AssistantAgent):
         ]
 
         try:
-            # 도구 없는 텍스트 생성을 위해 항상 깨끗한 클라이언트 사용
-            # (parallel_tool_calls 오류 방지)
-            if self.config:
-                clean_client = self.config.research_model.to_client()
-                response = await clean_client.create(messages)
-            else:
-                # config가 없는 경우 기존 클라이언트 사용 (fallback)
+            # 모델을 사용하여 지능적 작업 분해
+            try:
                 response = await self.model_client.create(messages)
+            except Exception as e:
+                if "parallel_tool_calls" in str(e) and self.config:
+                    clean_client = self.config.research_model.to_client()
+                    response = await clean_client.create(messages)
+                else:
+                    raise e
                     
             content = response.content
             
@@ -712,7 +712,7 @@ class DeepResearchTeam:
         response = await self.supervisor_agent.on_messages(messages, None)
         
         # 감독자 응답에서 연구 작업 추출
-        # AI를 사용하여 지능적으로 작업 분해 (open_deep_research 방식 적용)
+
         tasks = await self.supervisor_agent.create_research_tasks(
             state.research_brief.research_brief,
             min(
