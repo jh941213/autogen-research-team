@@ -3,14 +3,16 @@
 [Microsoft AutoGen](https://github.com/microsoft/autogen) 프레임워크를 기반으로 한 향상된 심층 연구 시스템입니다.  
 LangGraph의 state machine 패턴을 AutoGen의 **Teams**와 **Agent** 패턴으로 변환하여, 다중 에이전트 협업을 통한 포괄적이고 체계적인 연구를 수행합니다.  
 
-> **📢 v2.1 업데이트 예정**: AutoGen **GraphFlow**를 적용한 고급 워크플로우 라우팅 시스템 구현 예정입니다. 현재는 기본 Agent 패턴과 FunctionTool 기반으로 구현되어 있습니다.
+> **✅ v2.1 완료**: **개별 압축 시스템** 구현으로 메모리 효율성 대폭 개선! 각 연구자 완료 시점에 즉시 압축하여 토큰 한계 방지 및 성능 최적화를 달성했습니다.  
+> **📢 v3.0 예정**: AutoGen **GraphFlow**를 적용한 고급 워크플로우 라우팅 시스템 구현 예정입니다.
 
-## ✨ **최신 업데이트** ([v2.0](https://github.com/jh941213/autogen-research-team/releases/tag/v2.0))
+## ✨ **최신 업데이트** ([v2.1](https://github.com/jh941213/autogen-research-team/releases/tag/v2.1))
 
 🧠 **AI 기반 지능적 작업 분해** - open_deep_research 방식 통합  
+🔄 **개별 압축 시스템** - 각 연구자 완료 시점에 즉시 압축으로 메모리 효율성 극대화  
 ⚡ **자동 오류 처리** - Azure 콘텐츠 필터, 토큰 한계 등  
 🎯 **맞춤형 연구 계획** - 연구 주제별 동적 작업 생성  
-🔄 **견고한 Fallback** - AI 실패 시 체계적 기본 분해 방식  
+💾 **메모리 최적화** - raw_notes 제거와 점진적 압축으로 토큰 한계 방지  
 🚀 **최적화된 성능** - 90초 내 포괄적 연구 보고서 완성
 
 ## 🚀 **AutoGen 프레임워크 활용**
@@ -124,13 +126,20 @@ graph TB
     P --> R
     Q --> R
     
-    R --> S{연구 충분?}
+    R --> R1[🔄 개별 압축 #1<br/>CompressionAgent]
+    R --> R2[🔄 개별 압축 #2<br/>CompressionAgent]
+    R --> R3[🔄 개별 압축 #N<br/>CompressionAgent]
+    
+    R1 --> S{연구 충분?}
+    R2 --> S
+    R3 --> S
+    
     S -->|No| T[🔄 추가 연구 수행]
     T --> J
     
-    S -->|Yes| U[📊 CompressionAgent<br/>AssistantAgent]
+    S -->|Yes| U[📊 통합 압축<br/>CompressionAgent]
     
-    U --> V[🗜️ 결과 압축 및 정리<br/>중복 제거, 소스 정리]
+    U --> V[🗜️ 개별 압축 결과 통합<br/>중복 제거, 패턴 식별]
     
     V --> W[📄 ReportWriterAgent<br/>AssistantAgent]
     
@@ -139,6 +148,9 @@ graph TB
     style A fill:#e1f5fe
     style E fill:#f3e5f5
     style J fill:#e8f5e8
+    style R1 fill:#ffe0e6
+    style R2 fill:#ffe0e6
+    style R3 fill:#ffe0e6
     style U fill:#fff3e0
     style W fill:#fce4ec
     style X fill:#e0f2f1
@@ -154,6 +166,12 @@ graph TB
 - **명확화 판단**: 사용자 요청의 모호성 자동 감지
 - **작업 분해 성공/실패**: AI 기반 분해 vs Fallback 시스템 자동 선택
 - **연구 충분성 판정**: SupervisorAgent의 지능적 완료 판단
+
+#### 🔄 **개별 압축 시스템** (v2.1 신규)
+- **즉시 압축**: 각 연구자 완료 시점에 결과를 바로 압축하여 메모리 효율성 극대화
+- **메모리 최적화**: raw_notes 제거와 점진적 데이터 압축으로 토큰 한계 방지
+- **통합 압축**: 개별 압축된 결과들을 최종 통합하여 중복 제거 및 패턴 식별
+- **안정성 보장**: 압축 실패 시 원본 데이터 사용으로 서비스 연속성 보장
 
 #### 🔄 **자동 복구 메커니즘**
 - API 오류, 콘텐츠 필터 등 각종 예외 상황에 대한 자동 재시도
@@ -396,7 +414,7 @@ class ResearcherAgent(AssistantAgent):
   - MCP 도구들 (선택적)
 - **검증**: 최소 2회 이상 검색 수행 후 연구 완료 가능
 
-### 📊 CompressionAgent (extends `AssistantAgent`)
+### 📊 CompressionAgent (extends `AssistantAgent`) ⭐ v2.1 업그레이드
 ```python
 class CompressionAgent(AssistantAgent):
     def __init__(self, model_client):
@@ -405,14 +423,25 @@ class CompressionAgent(AssistantAgent):
             model_client=model_client,
             system_message=compress_research_system_prompt
         )
+    
+    # v2.1 신규: 개별 압축 기능
+    async def _compress_individual_research(self, result: ResearchResult):
+        # 각 연구자 완료 시점에 즉시 압축
+        # 메모리 효율성 극대화, raw_notes 제거
 ```
-- **AutoGen 기능**: 전문화된 시스템 프롬프트로 결과 압축
-- **역할**: 여러 연구 결과를 정리하고 중복 제거
-- **기능**: 
-  - 연구 결과 통합 및 정리
-  - 중복 정보 제거
-  - 소스 정보 보존
-- **출력**: 압축된 연구 결과 (`CompressedResearch` 모델)
+- **AutoGen 기능**: 전문화된 시스템 프롬프트로 이중 압축 수행
+- **v2.1 신규 역할**: 
+  - 🔄 **개별 압축**: 각 연구자 완료 시점에 결과를 즉시 압축 (1000자 이상)
+  - 📊 **통합 압축**: 개별 압축된 결과들을 최종 통합 및 중복 제거
+- **개별 압축 기능** (v2.1):
+  - 즉시 메모리 최적화로 토큰 한계 방지
+  - raw_notes 제거로 데이터 경량화
+  - 압축 실패 시 원본 사용으로 안정성 보장
+- **통합 압축 기능**:
+  - 개별 압축 결과들의 패턴 식별 및 연결
+  - 상충 정보 균형잡힌 제시
+  - 소스 정보 보존 및 중복 제거
+- **출력**: 메모리 효율적인 압축된 연구 결과 (`CompressedResearch` 모델)
 
 ### 📄 ReportWriterAgent (extends `AssistantAgent`)
 ```python
