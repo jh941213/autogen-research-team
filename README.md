@@ -89,30 +89,75 @@ class SupervisorAgent(AssistantAgent):
 
 ## 🏗️ AutoGen 기반 시스템 아키텍처
 
+```mermaid
+graph TB
+    A[👤 사용자 요청<br/>TextMessage] --> B{명확화 필요?}
+    
+    B -->|Yes| C[🤔 ClarificationAgent<br/>AssistantAgent]
+    B -->|No| D[📋 ResearchBriefAgent<br/>AssistantAgent]
+    C --> D
+    
+    D --> E[🎯 SupervisorAgent<br/>AssistantAgent + FunctionTool]
+    
+    E --> F[🧠 AI 기반 작업 분해<br/>create_research_tasks]
+    F --> G{작업 분해 성공?}
+    
+    G -->|Yes| H[📝 맞춤형 작업 생성<br/>1~N개 독립 작업]
+    G -->|No| I[🔄 Fallback 시스템<br/>체계적 기본 분해]
+    
+    H --> J[🔍 병렬 연구 수행]
+    I --> J
+    
+    J --> K[ResearcherAgent #1<br/>FunctionTool: web_search]
+    J --> L[ResearcherAgent #2<br/>FunctionTool: web_search]  
+    J --> M[ResearcherAgent #N<br/>FunctionTool: web_search]
+    
+    K --> N{검색 API}
+    L --> N
+    M --> N
+    
+    N --> O[🌐 Tavily Search]
+    N --> P[🦆 DuckDuckGo Search]
+    N --> Q[🔧 MCP Tools<br/>선택적]
+    
+    O --> R[📊 연구 결과 수집]
+    P --> R
+    Q --> R
+    
+    R --> S{연구 충분?}
+    S -->|No| T[🔄 추가 연구 수행]
+    T --> J
+    
+    S -->|Yes| U[📊 CompressionAgent<br/>AssistantAgent]
+    
+    U --> V[🗜️ 결과 압축 및 정리<br/>중복 제거, 소스 정리]
+    
+    V --> W[📄 ReportWriterAgent<br/>AssistantAgent]
+    
+    W --> X[📋 최종 연구 보고서<br/>Markdown 형식]
+    
+    style A fill:#e1f5fe
+    style E fill:#f3e5f5
+    style J fill:#e8f5e8
+    style U fill:#fff3e0
+    style W fill:#fce4ec
+    style X fill:#e0f2f1
 ```
-📧 사용자 요청 (TextMessage)
-    ↓
-🤔 명확화 단계 (ClarificationAgent extends AssistantAgent)
-    ↓
-📋 연구 계획 생성 (ResearchBriefAgent extends AssistantAgent)
-    ↓
-🎯 연구 오케스트레이션 (SupervisorAgent extends AssistantAgent)
-    │   ├── 🧠 AI 기반 지능적 작업 분해 (create_research_tasks)
-    │   │   ├── 동적 작업 수 결정 (1~N개)
-    │   │   ├── 맞춤형 작업 생성
-    │   │   └── Fallback → 체계적 기본 분해
-    │   ├── FunctionTool: conduct_research
-    │   └── FunctionTool: research_complete
-    ↓
-🔍 병렬 연구 수행 (ResearcherAgent × N extends AssistantAgent)
-    │   ├── FunctionTool: web_search (Tavily/DuckDuckGo)
-    │   ├── FunctionTool: research_complete
-    │   └── MCP Tools (선택적)
-    ↓
-📊 결과 압축 (CompressionAgent extends AssistantAgent)
-    ↓
-📄 최종 보고서 생성 (ReportWriterAgent extends AssistantAgent)
-```
+
+### 🔧 워크플로우 주요 특징
+
+#### 📡 **메시지 기반 통신**
+- AutoGen의 `TextMessage`, `HandoffMessage` 등을 활용한 구조화된 에이전트 간 통신
+- 각 단계별 명확한 입력/출력 정의로 안정적인 데이터 플로우 보장
+
+#### 🧠 **지능적 의사결정 노드**
+- **명확화 판단**: 사용자 요청의 모호성 자동 감지
+- **작업 분해 성공/실패**: AI 기반 분해 vs Fallback 시스템 자동 선택
+- **연구 충분성 판정**: SupervisorAgent의 지능적 완료 판단
+
+#### 🔄 **자동 복구 메커니즘**
+- API 오류, 콘텐츠 필터 등 각종 예외 상황에 대한 자동 재시도
+- Fallback 시스템으로 서비스 연속성 보장
 
 ### 🔧 **AutoGen 통합 세부사항**
 
