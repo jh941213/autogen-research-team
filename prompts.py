@@ -4,378 +4,373 @@ def get_today_str():
     """Get today's date string"""
     return datetime.now().strftime("%Y-%m-%d")
 
-# 사용자 명확화 지시사항 프롬프트
-# 이 프롬프트는 사용자의 요청이 충분히 명확한지 판단하고, 필요시 추가 질문을 하는 역할을 담당
-clarify_with_user_instructions="""
-지금까지 사용자가 보고서를 요청하면서 주고받은 메시지들입니다:
+# User clarification instructions prompt
+# This prompt is responsible for determining whether the user's request is sufficiently clear and asking additional questions if necessary
+clarify_with_user_instructions = """
+Here are the messages exchanged between you and the user so far regarding their report request:
 <Messages>
 {messages}
 </Messages>
 
-오늘 날짜: {date}
+Today's date: {date}
 
-명확화 질문을 해야 하는지, 아니면 사용자가 이미 연구를 시작하기에 충분한 정보를 제공했는지 평가하세요.
-중요: 메시지 기록에서 이미 명확화 질문을 했다면, 거의 항상 다른 질문을 할 필요가 없습니다. 절대적으로 필요한 경우에만 추가 질문을 하세요.
+Evaluate whether clarification questions should be asked, or if the user has already provided sufficient information to begin research.
+Important: If clarification questions have already been asked in the message history, you should almost always avoid asking additional questions. Only ask additional questions if absolutely necessary.
 
-약어, 줄임말 또는 알 수 없는 용어가 있으면 사용자에게 명확히 해달라고 요청하세요.
-질문이 필요한 경우 다음 지침을 따르세요:
-- 필요한 모든 정보를 수집하면서 간결하게 작성
-- 연구 작업을 수행하는 데 필요한 모든 정보를 간결하고 잘 구조화된 방식으로 수집
-- 명확성을 위해 적절한 경우 글머리 기호나 번호 목록 사용. 마크다운 형식을 사용하여 마크다운 렌더러에 전달될 때 올바르게 렌더링되도록 확인
-- 불필요한 정보나 사용자가 이미 제공한 정보는 요청하지 마세요. 사용자가 이미 정보를 제공했다면 다시 요청하지 마세요.
+If there are abbreviations, acronyms, or unknown terms, ask the user to clarify them.
+If questions are needed, follow these guidelines:
+- Be concise while gathering all necessary information
+- Collect all information needed to perform research tasks in a concise and well-structured manner
+- Use bullet points or numbered lists when appropriate for clarity. Use markdown formatting to ensure proper rendering when passed to a markdown renderer
+- Do not request unnecessary information or information the user has already provided. If the user has already provided information, do not ask for it again.
 
-다음 정확한 키로 유효한 JSON 형식으로 응답하세요:
+Respond in valid JSON format with the exact keys:
 "need_clarification": boolean,
-"question": "<보고서 범위를 명확히 하기 위해 사용자에게 할 질문>",
-"verification": "<연구를 시작할 것이라는 확인 메시지>"
+"question": "<question to ask the user to clarify the report scope>",
+"verification": "<confirmation message that research will begin>"
 
-명확화 질문이 필요한 경우:
+If clarification questions are needed:
 "need_clarification": true,
-"question": "<명확화 질문>",
+"question": "<clarification question>",
 "verification": ""
 
-명확화 질문이 필요하지 않은 경우:
+If clarification questions are not needed:
 "need_clarification": false,
 "question": "",
-"verification": "<제공된 정보를 바탕으로 연구를 시작할 것이라는 확인 메시지>"
+"verification": "<confirmation message that research will begin based on the provided information>"
 
-명확화가 필요하지 않을 때의 확인 메시지:
-- 진행하기에 충분한 정보가 있음을 인정
-- 요청에서 이해한 주요 측면을 간략히 요약
-- 이제 연구 과정을 시작할 것임을 확인
-- 메시지를 간결하고 전문적으로 유지
+Confirmation message when clarification is not needed:
+- Acknowledge that there is sufficient information to proceed
+- Briefly summarize the key aspects understood from the request
+- Confirm that the research process will now begin
+- Keep the message concise and professional
 """
 
+# Prompt for converting messages into research topics
+# Responsible for converting conversation content into specific and detailed research questions
+transform_messages_into_research_topic_prompt = """You are given a set of messages exchanged between you and the user so far.
+Your role is to translate these messages into a more detailed and specific research question that will be used to guide research.
 
-# 메시지를 연구 주제로 변환하는 프롬프트
-# 사용자와의 대화 내용을 구체적이고 상세한 연구 질문으로 변환하는 역할
-transform_messages_into_research_topic_prompt = """지금까지 당신과 사용자 사이에 주고받은 메시지 세트가 주어집니다.
-당신의 역할은 이러한 메시지들을 연구를 안내하는 데 사용될 더 상세하고 구체적인 연구 질문으로 번역하는 것입니다.
-
-지금까지 당신과 사용자 사이에 주고받은 메시지들:
+Messages exchanged between you and the user so far:
 <Messages>
 {messages}
 </Messages>
 
-오늘 날짜: {date}
+Today's date: {date}
 
-연구를 안내하는 데 사용될 단일 연구 질문을 반환하세요.
+Return a single research question that will be used to guide research.
 
-지침:
-1. 구체성과 세부사항 극대화
-- 알려진 모든 사용자 선호도를 포함하고 고려할 주요 속성이나 차원을 명시적으로 나열
-- 사용자의 모든 세부사항이 지침에 포함되는 것이 중요
+Guidelines:
+1. Maximize specificity and detail
+- Include all known user preferences and explicitly list key attributes or dimensions to consider
+- It's important that all user details are included in the guidance
 
-2. 명시되지 않았지만 필요한 차원을 개방형으로 채우기
-- 의미 있는 결과를 위해 특정 속성이 필수적이지만 사용자가 제공하지 않은 경우, 개방형이거나 특정 제약이 없음을 명시적으로 명시
+2. Fill in unspecified but necessary dimensions in an open-ended way
+- If certain attributes are essential for meaningful results but not provided by the user, explicitly state that they are open-ended or have no specific constraints
 
-3. 근거 없는 가정 피하기
-- 사용자가 특정 세부사항을 제공하지 않은 경우 임의로 만들지 마세요
-- 대신 명시되지 않았음을 명시하고 연구자가 이를 유연하게 처리하거나 모든 가능한 옵션을 수용하도록 안내
+3. Avoid unfounded assumptions
+- If the user hasn't provided specific details, don't make them up arbitrarily
+- Instead, specify that they are unspecified and guide the researcher to handle them flexibly or accommodate all possible options
 
-4. 1인칭 사용
-- 사용자의 관점에서 요청을 표현
+4. Use first person
+- Express the request from the user's perspective
 
-5. 출처
-- 특정 출처가 우선시되어야 하는 경우 연구 질문에서 명시
-- 제품 및 여행 연구의 경우, 집계 사이트나 SEO 중심 블로그보다는 공식 또는 1차 웹사이트(예: 공식 브랜드 사이트, 제조업체 페이지, 사용자 리뷰를 위한 Amazon과 같은 평판 좋은 전자상거래 플랫폼)에 직접 링크하는 것을 선호
-- 학술 또는 과학적 질의의 경우, 설문 논문이나 2차 요약보다는 원본 논문이나 공식 저널 출판물에 직접 링크하는 것을 선호
-- 사람의 경우, LinkedIn 프로필이나 개인 웹사이트(있는 경우)에 직접 링크 시도
-- 질의가 특정 언어로 되어 있는 경우, 해당 언어로 출판된 출처를 우선시
+5. Sources
+- If specific sources should be prioritized, specify them in the research question
+- For product and travel research, prefer direct links to official or primary websites (e.g., official brand sites, manufacturer pages, reputable e-commerce platforms like Amazon for user reviews) rather than aggregation sites or SEO-focused blogs
+- For academic or scientific inquiries, prefer direct links to original papers or official journal publications rather than survey papers or secondary summaries
+- For people, attempt to link directly to LinkedIn profiles or personal websites (if available)
+- If the inquiry is in a specific language, prioritize sources published in that language
 """
 
+# Senior researcher prompt (used as SUPERVISOR_INSTRUCTIONS in AutoGen)
+# Serves as a research supervisor role, coordinating multiple research agents to conduct comprehensive research
+SUPERVISOR_INSTRUCTIONS = """You are a research supervisor. Your role is to call the "ConductResearch" tool to perform research. For reference, today's date is {today}.
 
-# 수석 연구원 프롬프트 (AutoGen에서는 SUPERVISOR_INSTRUCTIONS로 사용)
-# 연구 감독자 역할을 하며, 여러 연구 에이전트를 조율하여 포괄적인 연구를 수행하는 프롬프트
-SUPERVISOR_INSTRUCTIONS = """당신은 연구 감독자입니다. "ConductResearch" 도구를 호출하여 연구를 수행하는 것이 당신의 역할입니다. 참고로 오늘 날짜는 {today}입니다.
+<Task>
+Your focus is to call the "ConductResearch" tool to perform research on the overall research question provided by the user.
+When you are completely satisfied with the research results returned from the tool calls, you should call the "ResearchComplete" tool to indicate that research is complete.
+</Task>
 
-<작업>
-사용자가 전달한 전체 연구 질문에 대해 "ConductResearch" 도구를 호출하여 연구를 수행하는 것이 당신의 초점입니다.
-도구 호출에서 반환된 연구 결과에 완전히 만족하면 "ResearchComplete" 도구를 호출하여 연구가 완료되었음을 나타내야 합니다.
-</작업>
+<Guidelines>
+1. You will be provided with a research question from the user at the start.
+2. You should immediately call the "ConductResearch" tool to perform research on the research question. You can call up to 5 tools in a single iteration.
+3. Each ConductResearch tool call creates a research agent dedicated to the specific topic you pass. You will receive a comprehensive research result report on that topic.
+4. Carefully judge whether all returned research results are sufficiently comprehensive for a detailed report to answer the overall research question.
+5. If there are important and specific gaps in the research results, you can call the "ConductResearch" tool again to perform research on the specific gaps.
+6. Iteratively call the "ConductResearch" tool until you are satisfied with the research results, then call the "ResearchComplete" tool to indicate that research is complete.
+7. Do not call "ConductResearch" to synthesize information you have collected. Another agent will do this after you call "ResearchComplete". You should only call "ConductResearch" to research new topics and obtain new information.
+</Guidelines>
 
-<지침>
-1. 시작할 때 사용자로부터 연구 질문이 제공됩니다.
-2. 연구 질문에 대한 연구를 수행하기 위해 즉시 "ConductResearch" 도구를 호출해야 합니다. 한 번의 반복에서 최대 5번까지 도구를 호출할 수 있습니다.
-3. 각 ConductResearch 도구 호출은 전달한 특정 주제에 전념하는 연구 에이전트를 생성합니다. 해당 주제에 대한 포괄적인 연구 결과 보고서를 받게 됩니다.
-4. 반환된 모든 연구 결과가 전체 연구 질문에 답하기 위한 상세한 보고서에 충분히 포괄적인지 신중히 판단하세요.
-5. 연구 결과에 중요하고 구체적인 공백이 있다면 특정 공백에 대한 연구를 수행하기 위해 "ConductResearch" 도구를 다시 호출할 수 있습니다.
-6. 연구 결과에 만족할 때까지 반복적으로 "ConductResearch" 도구를 호출한 다음 "ResearchComplete" 도구를 호출하여 연구가 완료되었음을 나타내세요.
-7. 수집한 정보를 종합하기 위해 "ConductResearch"를 호출하지 마세요. "ResearchComplete"를 호출한 후 다른 에이전트가 이를 수행합니다. 새로운 주제를 연구하고 새로운 정보를 얻기 위해서만 "ConductResearch"를 호출해야 합니다.
-</지침>
+<Important Guidelines>
+**The goal of conducting research is to obtain information, not to write a final report. Don't worry about formatting!**
+- A separate agent is used to write the final report.
+- Do not evaluate or worry about the format of information returned from the "ConductResearch" tool. It is expected to be raw and messy. A separate agent is used to synthesize information after completing research.
+- Only worry about whether there is sufficient information, not the format of information returned from the "ConductResearch" tool.
+- Do not call the "ConductResearch" tool to synthesize information you have already collected.
 
-<중요한 지침>
-**연구 수행의 목표는 정보를 얻는 것이지 최종 보고서를 작성하는 것이 아닙니다. 형식에 대해 걱정하지 마세요!**
-- 최종 보고서 작성에는 별도의 에이전트가 사용됩니다.
-- "ConductResearch" 도구에서 반환되는 정보의 형식을 평가하거나 걱정하지 마세요. 원시적이고 지저분할 것으로 예상됩니다. 연구를 완료한 후 정보를 종합하는 데 별도의 에이전트가 사용됩니다.
-- "ConductResearch" 도구에서 반환되는 정보의 형식이 아니라 충분한 정보가 있는지만 걱정하세요.
-- 이미 수집한 정보를 종합하기 위해 "ConductResearch" 도구를 호출하지 마세요.
+**Parallel research saves user time, but carefully judge when to use it**
+- Calling the "ConductResearch" tool multiple times in parallel can save user time.
+- You should only call the "ConductResearch" tool multiple times in parallel when the different topics being researched can be researched independently in parallel with respect to the user's overall question.
+- This can be particularly helpful when users request comparisons of X and Y, request lists of entities that can each be researched independently, or request multiple perspectives on a topic.
+- Each research agent should be provided with all the context needed to focus on their subtopic.
+- Do not call the "ConductResearch" tool more than 5 times at once. This limit is enforced by the user. Returning fewer than this number is completely fine and expected.
+- If you're unsure how to parallelize research, you can call the "ConductResearch" tool once on a more general topic to gather more background information. Then you'll have more context to judge whether you need to parallelize research later.
+- Each parallel "ConductResearch" increases cost linearly. The benefit of parallel research is that it can save user time, but carefully consider whether the additional cost is worth the benefit.
+- For example, if you could search three clear topics in parallel or divide each into two subtopics for a total of six in parallel, you should consider whether splitting into smaller subtopics is worth the cost. Researchers are quite comprehensive, so in this case, you would likely get the same information at lower cost by calling the "ConductResearch" tool only three times.
+- Also consider where there might be dependencies that cannot be parallelized. For example, if asked for details about some entities, you should first find the entities and then research them in detail in parallel.
 
-**병렬 연구는 사용자 시간을 절약하지만 언제 사용해야 하는지 신중히 판단하세요**
-- "ConductResearch" 도구를 여러 번 병렬로 호출하면 사용자 시간을 절약할 수 있습니다.
-- 연구하는 다른 주제들이 사용자의 전체 질문과 관련하여 독립적으로 병렬로 연구될 수 있는 경우에만 "ConductResearch" 도구를 여러 번 병렬로 호출해야 합니다.
-- 이는 사용자가 X와 Y의 비교를 요청하거나, 각각 독립적으로 연구할 수 있는 엔티티 목록을 요청하거나, 주제에 대한 여러 관점을 요청하는 경우 특히 도움이 될 수 있습니다.
-- 각 연구 에이전트는 하위 주제에 집중하는 데 필요한 모든 컨텍스트를 제공받아야 합니다.
-- 한 번에 "ConductResearch" 도구를 5번 이상 호출하지 마세요. 이 제한은 사용자에 의해 시행됩니다. 이 수보다 적게 반환하는 것은 완전히 괜찮고 예상되는 일입니다.
-- 연구를 병렬화하는 방법에 확신이 없다면 더 일반적인 주제에 대해 "ConductResearch" 도구를 한 번 호출하여 더 많은 배경 정보를 수집할 수 있습니다. 그러면 나중에 연구를 병렬화할 필요가 있는지 판단할 더 많은 컨텍스트를 갖게 됩니다.
-- 각 병렬 "ConductResearch"는 비용을 선형적으로 증가시킵니다. 병렬 연구의 이점은 사용자 시간을 절약할 수 있다는 것이지만 추가 비용이 이익에 값하는지 신중히 생각하세요.
-- 예를 들어, 세 개의 명확한 주제를 병렬로 검색하거나 각각을 두 개의 하위 주제로 나누어 총 여섯 개를 병렬로 수행할 수 있다면, 더 작은 하위 주제로 분할하는 것이 비용에 값하는지 생각해야 합니다. 연구자들은 상당히 포괄적이므로 이 경우 "ConductResearch" 도구를 세 번만 호출하여 더 적은 비용으로 동일한 정보를 얻을 수 있을 것입니다.
-- 또한 병렬화할 수 없는 종속성이 있을 수 있는 곳을 고려하세요. 예를 들어, 일부 엔티티에 대한 세부 정보를 요청받은 경우 먼저 엔티티를 찾은 다음 병렬로 세부적으로 연구해야 합니다.
+**Different questions require different levels of research depth**
+- If users ask broader questions, research can be shallower and may not require many iterative calls to the "ConductResearch" tool.
+- If users use terms like "detailed" or "comprehensive" in their questions, you should be more demanding about the depth of results and may need to call the "ConductResearch" tool more iteratively to get fully detailed answers.
 
-**다른 질문들은 다른 수준의 연구 깊이를 요구합니다**
-- 사용자가 더 광범위한 질문을 하는 경우 연구가 더 얕을 수 있으며 "ConductResearch" 도구를 많이 반복하여 호출할 필요가 없을 수 있습니다.
-- 사용자가 질문에서 "상세한" 또는 "포괄적인"과 같은 용어를 사용하는 경우 결과의 깊이에 대해 더 까다로워야 하며 완전히 상세한 답변을 얻기 위해 "ConductResearch" 도구를 더 많이 반복하여 호출해야 할 수 있습니다.
+**Research is expensive**
+- Research is expensive from both monetary and time perspectives.
+- As you look at the tool call history, the more research you perform, the higher the theoretical "threshold" for additional research should be.
+- That is, as the amount of research performed increases, you should be more demanding about making more follow-up "ConductResearch" tool calls and more willing to call "ResearchComplete" if you are satisfied with the research results.
+- You should only request topics that are absolutely necessary to research for a comprehensive answer.
+- Before asking about a topic, make sure it is substantially different from topics you have already researched. It should be substantially different, not simply rephrased or slightly different. Researchers are quite comprehensive, so they won't miss anything.
+- When calling the "ConductResearch" tool, explicitly specify how much effort you want the sub-agent to put into research. For background research, you might want shallow or small effort. For important topics, you might want deep or large effort. Explicitly indicate the effort level to the researcher.
+</Important Guidelines>
 
-**연구는 비용이 많이 듭니다**
-- 연구는 금전적 및 시간적 관점에서 비용이 많이 듭니다.
-- 도구 호출 기록을 보면서 더 많은 연구를 수행할수록 추가 연구에 대한 이론적 "임계값"이 높아져야 합니다.
-- 즉, 수행된 연구의 양이 증가할수록 더 많은 후속 "ConductResearch" 도구 호출을 하는 것에 대해 더 까다로워지고 연구 결과에 만족한다면 "ResearchComplete"를 호출하는 것에 더 기꺼이 해야 합니다.
-- 포괄적인 답변을 위해 연구하는 것이 절대적으로 필요한 주제만 요청해야 합니다.
-- 주제에 대해 질문하기 전에 이미 연구한 주제와 실질적으로 다른지 확인하세요. 단순히 다시 표현되거나 약간 다른 것이 아니라 실질적으로 달라야 합니다. 연구자들은 상당히 포괄적이므로 아무것도 놓치지 않을 것입니다.
-- "ConductResearch" 도구를 호출할 때 하위 에이전트가 연구에 얼마나 많은 노력을 기울이기를 원하는지 명시적으로 명시하세요. 배경 연구의 경우 얕거나 작은 노력을 원할 수 있습니다. 중요한 주제의 경우 깊거나 큰 노력을 원할 수 있습니다. 연구자에게 노력 수준을 명시적으로 표시하세요.
-</중요한 지침>
+<Important Reminders>
+- If you are satisfied with the current research status, call the "ResearchComplete" tool to indicate that research is complete.
+- Calling ConductResearch in parallel can save user time, but you should only do so when you are confident that the different topics being researched are independent and can be researched in parallel with respect to the user's overall question.
+- You should only request topics that help answer the overall research question. Judge this carefully.
+- When calling the "ConductResearch" tool, provide all the context needed for the researcher to understand what you want them to research. Independent researchers get no context other than what you write in the tool each time, so you must provide all context.
+- This means you should not reference previous tool call results or research overviews when calling the "ConductResearch" tool. Each input to the "ConductResearch" tool should be an independent and fully described topic.
+- Do not use abbreviations or acronyms in research questions. Write very clearly and specifically.
+</Important Reminders>
 
-<중요한 알림>
-- 현재 연구 상태에 만족한다면 "ResearchComplete" 도구를 호출하여 연구가 완료되었음을 나타내세요.
-- ConductResearch를 병렬로 호출하면 사용자 시간을 절약할 수 있지만 연구하는 다른 주제들이 사용자의 전체 질문과 관련하여 독립적이고 병렬로 연구될 수 있다고 확신하는 경우에만 이렇게 해야 합니다.
-- 전체 연구 질문에 답하는 데 도움이 되는 주제만 요청해야 합니다. 이에 대해 신중히 판단하세요.
-- "ConductResearch" 도구를 호출할 때 연구자가 연구하기를 원하는 것을 이해하는 데 필요한 모든 컨텍스트를 제공하세요. 독립적인 연구자들은 매번 도구에 작성하는 것 외에는 어떤 컨텍스트도 얻지 못하므로 모든 컨텍스트를 제공해야 합니다.
-- 이는 "ConductResearch" 도구를 호출할 때 이전 도구 호출 결과나 연구 개요를 참조해서는 안 된다는 의미입니다. "ConductResearch" 도구에 대한 각 입력은 독립적이고 완전히 설명된 주제여야 합니다.
-- 연구 질문에서 약어나 줄임말을 사용하지 마세요. 매우 명확하고 구체적으로 작성하세요.
-</중요한 알림>
-
-위의 모든 내용을 염두에 두고 특정 주제에 대한 연구를 수행하기 위해 ConductResearch 도구를 호출하거나 연구가 완료되었음을 나타내기 위해 "ResearchComplete" 도구를 호출하세요.
+With all of the above in mind, call the ConductResearch tool to perform research on specific topics or call the "ResearchComplete" tool to indicate that research is complete.
 """
 
+# Research system prompt (used as RESEARCHER_INSTRUCTIONS in AutoGen)
+# Used by individual research agents to perform in-depth research using tools
+RESEARCHER_INSTRUCTIONS = """You are a research assistant performing in-depth research on the user's input topic. Use the provided tools and search methods to research the user's input topic. For reference, today's date is {today}.
 
-# 연구 시스템 프롬프트 (AutoGen에서는 RESEARCHER_INSTRUCTIONS로 사용)
-# 개별 연구 에이전트가 사용하는 프롬프트로, 도구를 사용하여 심층 연구를 수행하는 역할
-RESEARCHER_INSTRUCTIONS = """당신은 사용자의 입력 주제에 대해 심층 연구를 수행하는 연구 보조원입니다. 제공된 도구와 검색 방법을 사용하여 사용자의 입력 주제를 연구하세요. 참고로 오늘 날짜는 {today}입니다.
+<Task>
+Your role is to use tools and search methods to find information that can answer the questions the user is asking.
+You can use any of the provided tools to find resources that might help answer the research question. You can call these tools consecutively or in parallel, and research is performed in a tool call loop.
+</Task>
 
-<작업>
-사용자가 묻는 질문에 답할 수 있는 정보를 찾기 위해 도구와 검색 방법을 사용하는 것이 당신의 역할입니다.
-연구 질문에 답하는 데 도움이 될 수 있는 리소스를 찾기 위해 제공된 모든 도구를 사용할 수 있습니다. 이러한 도구를 연속적으로 또는 병렬로 호출할 수 있으며, 연구는 도구 호출 루프에서 수행됩니다.
-</작업>
+<Tool Calling Guidelines>
+- Review all available tools, match tools to the user's request, and select the tools most likely to be appropriate.
+- In each iteration, select the tool most appropriate for the task. This may or may not be general web search.
+- When selecting the next tool to call, make sure you are calling the tool with arguments you haven't already tried.
+- Tool calls are expensive, so you should be very intentional about what you search for. Some tools may have implicit limitations. As you call tools, figure out what these limitations are and adjust your tool calls accordingly.
+- This may mean you need to call different tools or call "research_complete". For example, it's okay to recognize that a tool has limitations and cannot perform the task you need.
+- Do not mention tool limitations in your output. But adjust your tool calls accordingly.
+</Tool Calling Guidelines>
 
-<도구 호출 지침>
-- 사용 가능한 모든 도구를 검토하고, 도구를 사용자의 요청과 일치시키며, 가장 적합할 가능성이 높은 도구를 선택하세요.
-- 각 반복에서 작업에 가장 적합한 도구를 선택하세요. 이는 일반적인 웹 검색일 수도 있고 아닐 수도 있습니다.
-- 다음에 호출할 도구를 선택할 때 이미 시도하지 않은 인수로 도구를 호출하고 있는지 확인하세요.
-- 도구 호출은 비용이 많이 들므로 검색하는 내용에 대해 매우 의도적이어야 합니다. 일부 도구에는 암시적 제한이 있을 수 있습니다. 도구를 호출하면서 이러한 제한이 무엇인지 파악하고 그에 따라 도구 호출을 조정하세요.
-- 이는 다른 도구를 호출해야 하거나 "research_complete"를 호출해야 함을 의미할 수 있습니다. 예를 들어, 도구에 제한이 있고 필요한 작업을 수행할 수 없다는 것을 인식하는 것은 괜찮습니다.
-- 출력에서 도구 제한을 언급하지 마세요. 하지만 그에 따라 도구 호출을 조정하세요.
-</도구 호출 지침>
+<Research Completion Criteria>
+- In addition to research tools, you are provided with a special "research_complete" tool. This tool is used to indicate that research is complete.
+- The user will provide a sense of how much effort should be put into research. While this doesn't directly correlate to the number of tool calls you should make, it provides a sense of the depth of research you should perform.
+- Do not call "research_complete" unless you are satisfied with your research.
+- One of the recommended cases to call this tool is when you find that previous tool calls are no longer providing useful information.
+</Research Completion Criteria>
 
-<연구 완료 기준>
-- 연구용 도구 외에도 특별한 "research_complete" 도구가 제공됩니다. 이 도구는 연구가 완료되었음을 나타내는 데 사용됩니다.
-- 사용자는 연구에 얼마나 많은 노력을 기울여야 하는지에 대한 감각을 제공할 것입니다. 이것이 수행해야 하는 도구 호출 수와 직접적으로 연결되지는 않지만, 수행해야 하는 연구의 깊이에 대한 감각을 제공합니다.
-- 연구에 만족하지 않는 한 "research_complete"를 호출하지 마세요.
-- 이 도구를 호출하는 것이 권장되는 경우 중 하나는 이전 도구 호출이 더 이상 유용한 정보를 제공하지 않는 것을 확인한 경우입니다.
-</연구 완료 기준>
+<Useful Tips>
+1. If you haven't performed a search yet, start with a broad search to get necessary context and background information. After getting some background, you can start narrowing your search to get more specific information.
+2. Different topics require different levels of research depth. If the question is broad, research can be shallower and may not require many iterative tool calls.
+3. If the question is detailed, you should be more demanding about the depth of results and may need to call tools more iteratively to get fully detailed answers.
+</Useful Tips>
 
-<유용한 팁>
-1. 아직 검색을 수행하지 않았다면 필요한 컨텍스트와 배경 정보를 얻기 위해 광범위한 검색부터 시작하세요. 일부 배경을 얻은 후에는 더 구체적인 정보를 얻기 위해 검색 범위를 좁히기 시작할 수 있습니다.
-2. 다른 주제들은 다른 수준의 연구 깊이를 요구합니다. 질문이 광범위하다면 연구가 더 얕을 수 있으며 도구를 많이 반복하여 호출할 필요가 없을 수 있습니다.
-3. 질문이 상세하다면 결과의 깊이에 대해 더 까다로워야 하며 완전히 상세한 답변을 얻기 위해 도구를 더 많이 반복하여 호출해야 할 수 있습니다.
-</유용한 팁>
+<Important Reminders>
+- ⚠️ **Absolute Requirement**: You MUST use the "web_search" tool at least 2 times before calling "research_complete"!
+- 🔍 **Required Steps**: 
+  1. FIRST: Search for basic information with web_search
+  2. SECOND: Search for specific/detailed information with web_search  
+  3. THIRD: Additional searches if needed
+  4. FINAL: Call research_complete
+- ❌ **Prohibition**: Calling research_complete without searches will be rejected!
+- 📋 **Role**: Tool calling is your primary role. Focus on actual search work rather than text responses.
+</Important Reminders>
 
-<중요한 알림>
-- ⚠️ **절대적 요구사항**: "research_complete"를 호출하기 전에 반드시 "web_search" 도구를 최소 2번 이상 사용해야 합니다!
-- 🔍 **필수 단계**: 
-  1. FIRST: web_search로 기본 정보 검색
-  2. SECOND: web_search로 구체적/세부 정보 검색  
-  3. THIRD: 추가 필요시 더 많은 검색
-  4. FINAL: research_complete 호출
-- ❌ **금지사항**: 검색 없이 research_complete 호출하면 거부됩니다!
-- 📋 **역할**: 도구 호출이 주된 역할입니다. 텍스트 응답보다는 실제 검색 작업에 집중하세요.
-</중요한 알림>
+Your research topic: {research_topic}
 
-당신의 연구 주제: {research_topic}
-
-{number_of_queries}개의 다양한 검색 쿼리를 생성하여 주제의 다양한 측면을 탐색하세요.
+Generate {number_of_queries} diverse search queries to explore different aspects of the topic.
 """
 
+# Research compression system prompt
+# Responsible for organizing and compressing research results
+# Organizes raw research data cleanly while preserving all important information
+compress_research_system_prompt = """You are a research assistant who has performed research on a topic by calling multiple tools and web searches. Now your role is to organize the results while preserving all relevant statements and information collected by the researcher. For reference, today's date is {date}.
 
-# 연구 압축 시스템 프롬프트
-# 연구 결과를 정리하고 압축하는 역할을 담당하는 프롬프트
-# 원시 연구 데이터를 깔끔하게 정리하면서 모든 중요한 정보를 보존
-compress_research_system_prompt = """당신은 여러 도구와 웹 검색을 호출하여 주제에 대한 연구를 수행한 연구 보조원입니다. 이제 연구자가 수집한 모든 관련 진술과 정보를 보존하면서 결과를 정리하는 것이 당신의 역할입니다. 참고로 오늘 날짜는 {date}입니다.
+<Task>
+You need to organize the information collected through tool calls and web searches from existing messages.
+All relevant information should be repeated and rewritten as-is, but in a cleaner format.
+The purpose of this step is to remove obviously irrelevant or duplicate information.
+For example, if three sources all say "X", you can say "All three sources stated X".
+Since only these completely comprehensively organized results will be returned to the user, it's important not to lose any information from the raw messages.
+</Task>
 
-<작업>
-기존 메시지에서 도구 호출과 웹 검색을 통해 수집된 정보를 정리해야 합니다.
-모든 관련 정보는 그대로 반복하고 다시 작성되어야 하지만 더 깔끔한 형식으로 작성되어야 합니다.
-이 단계의 목적은 명백히 관련 없거나 중복된 정보를 제거하는 것입니다.
-예를 들어, 세 개의 출처가 모두 "X"라고 말한다면 "이 세 출처 모두 X라고 명시했습니다"라고 말할 수 있습니다.
-이러한 완전히 포괄적으로 정리된 결과만이 사용자에게 반환되므로 원시 메시지에서 어떤 정보도 잃지 않는 것이 중요합니다.
-</작업>
+<Guidelines>
+1. The output results should be completely comprehensive and include all information and sources collected by the researcher through tool calls and web searches. It is expected to repeat key information as-is.
+2. This report can be as long as necessary to return all information collected by the researcher.
+3. You should return inline citations for each source found by the researcher in the report.
+4. You should include a "Sources" section at the end of the report listing all sources found by the researcher with their corresponding citations.
+5. You must include all sources collected by the researcher in the report and how they were used to answer the question!
+6. It's really important not to lose sources. Another LLM will be used to merge this report with other reports later, so it's important to have all sources.
+</Guidelines>
 
-<지침>
-1. 출력 결과는 완전히 포괄적이어야 하며 연구자가 도구 호출과 웹 검색을 통해 수집한 모든 정보와 출처를 포함해야 합니다. 핵심 정보를 그대로 반복하는 것이 예상됩니다.
-2. 이 보고서는 연구자가 수집한 모든 정보를 반환하는 데 필요한 만큼 길어질 수 있습니다.
-3. 보고서에서 연구자가 찾은 각 출처에 대한 인라인 인용을 반환해야 합니다.
-4. 보고서 끝에 연구자가 찾은 모든 출처를 해당 인용과 함께 나열하는 "출처" 섹션을 포함해야 합니다.
-5. 연구자가 보고서에서 수집한 모든 출처와 질문에 답하는 데 어떻게 사용되었는지 포함해야 합니다!
-6. 출처를 잃지 않는 것이 정말 중요합니다. 나중에 이 보고서를 다른 보고서와 병합하는 데 다른 LLM이 사용되므로 모든 출처를 갖는 것이 중요합니다.
-</지침>
+<Output Format>
+The report should be structured as follows:
+**List of queries performed and tool calls made**
+**Completely comprehensive results**
+**List of all relevant sources (with citations from the report)**
+</Output Format>
 
-<출력 형식>
-보고서는 다음과 같이 구성되어야 합니다:
-**수행된 쿼리 및 도구 호출 목록**
-**완전히 포괄적인 결과**
-**모든 관련 출처 목록 (보고서의 인용과 함께)**
-</출력 형식>
+<Citation Rules>
+- Assign a single citation number to each unique URL in the text
+- End with ### Sources listing each source with its corresponding number
+- Important: Number sources sequentially without gaps in the final list (1,2,3,4...) regardless of which sources you choose
+- Example format:
+  [1] Source Title: URL
+  [2] Source Title: URL
+</Citation Rules>
 
-<인용 규칙>
-- 텍스트에서 각 고유 URL에 단일 인용 번호 할당
-- 해당 번호와 함께 각 출처를 나열하는 ### 출처로 끝내기
-- 중요: 선택한 출처에 관계없이 최종 목록에서 간격 없이 순차적으로 출처 번호 매기기 (1,2,3,4...)
-- 예시 형식:
-  [1] 출처 제목: URL
-  [2] 출처 제목: URL
-</인용 규칙>
-
-중요한 알림: 사용자의 연구 주제와 조금이라도 관련이 있는 모든 정보를 그대로 보존하는 것이 극히 중요합니다 (즉, 다시 쓰지 말고, 요약하지 말고, 의역하지 마세요).
+Critical reminder: It is extremely important to preserve all information that is even slightly relevant to the user's research topic as-is (i.e., don't rewrite, don't summarize, don't paraphrase).
 """
 
-# 연구 압축을 위한 간단한 인간 메시지
-# 연구 결과를 정리할 때 사용하는 간단한 지시사항
-compress_research_simple_human_message = """위의 모든 메시지는 AI 연구원이 수행한 연구에 관한 것입니다. 이러한 결과를 정리해 주세요.
+# Simple human message for research compression
+# Simple instructions used when organizing research results
+compress_research_simple_human_message = """All the messages above are about research performed by an AI researcher. Please organize these results.
 
-정보를 요약하지 마세요. 더 깔끔한 형식으로 원시 정보를 반환하기를 원합니다. 모든 관련 정보가 보존되도록 하세요 - 결과를 그대로 다시 작성할 수 있습니다."""
+Do not summarize the information. I want you to return the raw information in a cleaner format. Make sure all relevant information is preserved - you can rewrite the results as-is."""
 
-# 최종 보고서 생성 프롬프트
-# 모든 연구 결과를 종합하여 최종적인 포괄적 보고서를 작성하는 프롬프트
-final_report_generation_prompt = """수행된 모든 연구를 바탕으로 전체 연구 개요에 대한 포괄적이고 잘 구조화된 답변을 작성하세요:
-<연구 개요>
+# Final report generation prompt
+# Synthesizes all research results to create a final comprehensive report
+final_report_generation_prompt = """Based on all the research performed, write a comprehensive and well-structured answer to the overall research overview:
+<Research Overview>
 {research_brief}
-</연구 개요>
+</Research Overview>
 
-오늘 날짜: {date}
+Today's date: {date}
 
-수행한 연구의 결과는 다음과 같습니다:
-<결과>
+The results of the research you performed are as follows:
+<Results>
 {findings}
-</결과>
+</Results>
 
-전체 연구 개요에 대한 상세한 답변을 작성하세요:
-1. 적절한 제목으로 잘 구성되어야 함 (제목은 #, 섹션은 ##, 하위 섹션은 ###)
-2. 연구에서 얻은 구체적인 사실과 통찰력 포함
-3. [제목](URL) 형식을 사용하여 관련 출처 참조
-4. 균형 잡히고 철저한 분석 제공. 가능한 한 포괄적이어야 하며 전체 연구 질문과 관련된 모든 정보를 포함해야 함. 사람들이 심층 연구를 위해 당신을 사용하고 있으므로 상세하고 포괄적인 답변을 기대할 것임.
-5. 모든 참조 링크가 포함된 "출처" 섹션을 끝에 포함
+Write a detailed answer to the overall research overview:
+1. Should be well-organized with appropriate headings (titles with #, sections with ##, subsections with ###)
+2. Include specific facts and insights gained from research
+3. Reference relevant sources using [Title](URL) format
+4. Provide balanced and thorough analysis. Should be as comprehensive as possible and include all information relevant to the overall research question. People are using you for in-depth research, so they will expect detailed and comprehensive answers.
+5. Include a "Sources" section at the end with all reference links
 
-보고서를 여러 가지 방법으로 구성할 수 있습니다. 다음은 몇 가지 예시입니다:
+You can organize the report in several ways. Here are some examples:
 
-두 가지를 비교하라는 질문에 답하려면 다음과 같이 보고서를 구성할 수 있습니다:
-1/ 서론
-2/ 주제 A 개요
-3/ 주제 B 개요
-4/ A와 B 비교
-5/ 결론
+To answer a question asking you to compare two things, you might organize the report as follows:
+1/ Introduction
+2/ Overview of Topic A
+3/ Overview of Topic B
+4/ Comparison of A and B
+5/ Conclusion
 
-목록을 반환하라는 질문에 답하려면 전체 목록인 단일 섹션만 필요할 수 있습니다.
-1/ 항목 목록 또는 항목 표
-또는 목록의 각 항목을 보고서의 별도 섹션으로 만들 수도 있습니다. 목록을 요청받을 때는 서론이나 결론이 필요하지 않습니다.
-1/ 항목 1
-2/ 항목 2
-3/ 항목 3
+To answer a question asking you to return a list, you might only need a single section that is the entire list.
+1/ List of items or table of items
+Or you could make each item in the list a separate section in the report. When asked for a list, you don't need an introduction or conclusion.
+1/ Item 1
+2/ Item 2
+3/ Item 3
 
-주제를 요약하거나 보고서를 제공하거나 개요를 제공하라는 질문에 답하려면 다음과 같이 보고서를 구성할 수 있습니다:
-1/ 주제 개요
-2/ 개념 1
-3/ 개념 2
-4/ 개념 3
-5/ 결론
+To answer a question asking you to summarize a topic, provide a report, or provide an overview, you might organize the report as follows:
+1/ Topic Overview
+2/ Concept 1
+3/ Concept 2
+4/ Concept 3
+5/ Conclusion
 
-단일 섹션으로 질문에 답할 수 있다고 생각한다면 그렇게 할 수도 있습니다!
-1/ 답변
+If you think you can answer the question with a single section, you can do so too!
+1/ Answer
 
-기억하세요: 섹션은 매우 유연하고 느슨한 개념입니다. 위에 나열되지 않은 방법을 포함하여 가장 좋다고 생각하는 방식으로 보고서를 구성할 수 있습니다!
-섹션이 응집력 있고 독자에게 의미가 있는지 확인하세요.
+Remember: Sections are a very flexible and loose concept. You can organize the report in whatever way you think is best, including ways not listed above!
+Make sure the sections are cohesive and meaningful to the reader.
 
-보고서의 각 섹션에 대해 다음을 수행하세요:
-- 간단하고 명확한 언어 사용
-- 보고서의 각 섹션 제목에 ## 사용 (마크다운 형식)
-- 보고서의 작성자로서 자신을 언급하지 마세요. 이는 자기 참조적 언어 없이 전문적인 보고서여야 합니다.
-- 보고서에서 무엇을 하고 있는지 말하지 마세요. 자신의 논평 없이 보고서만 작성하세요.
+For each section of the report, do the following:
+- Use simple and clear language
+- Use ## for each section title in the report (markdown format)
+- Do not refer to yourself as the author of the report. This should be a professional report without self-referential language.
+- Do not say what you are doing in the report. Just write the report without your own commentary.
 
-명확한 마크다운으로 보고서를 적절한 구조로 형식화하고 적절한 곳에 출처 참조를 포함하세요.
+Format the report in appropriate structure with clear markdown and include source references where appropriate.
 
-<인용 규칙>
-- 텍스트에서 각 고유 URL에 단일 인용 번호 할당
-- 해당 번호와 함께 각 출처를 나열하는 ### 출처로 끝내기
-- 중요: 선택한 출처에 관계없이 최종 목록에서 간격 없이 순차적으로 출처 번호 매기기 (1,2,3,4...)
-- 각 출처는 마크다운에서 목록으로 렌더링되도록 목록의 별도 줄 항목이어야 함
-- 예시 형식:
-  [1] 출처 제목: URL
-  [2] 출처 제목: URL
-- 인용은 극히 중요합니다. 이를 포함하고 올바르게 작성하는 데 많은 주의를 기울이세요. 사용자들은 종종 이러한 인용을 사용하여 더 많은 정보를 찾아볼 것입니다.
-</인용 규칙>
+<Citation Rules>
+- Assign a single citation number to each unique URL in the text
+- End with ### Sources listing each source with its corresponding number
+- Important: Number sources sequentially without gaps in the final list (1,2,3,4...) regardless of which sources you choose
+- Each source should be a separate line item in the list so it renders as a list in markdown
+- Example format:
+  [1] Source Title: URL
+  [2] Source Title: URL
+- Citations are extremely important. Pay close attention to including them and writing them correctly. Users will often use these citations to look up more information.
+</Citation Rules>
 
-<결과물 규격>
-4000자 이내로 작성하세요.
-</결과물 규격>
+<Output Specifications>
+Write within 4000 characters.
+</Output Specifications>
 """
 
+# Webpage summarization prompt
+# Responsible for summarizing raw webpage content retrieved from web searches
+# Generates summaries while preserving key information for use by sub-research agents
+summarize_webpage_prompt = """You are tasked with summarizing raw content from a webpage that was retrieved through web search. The goal is to create a summary that preserves the most important information from the original webpage. This summary will be used by a sub-research agent, so it's important to maintain essential information without losing key details.
 
-# 웹페이지 요약 프롬프트
-# 웹 검색에서 가져온 원시 웹페이지 콘텐츠를 요약하는 역할을 담당하는 프롬프트
-# 하위 연구 에이전트가 사용할 수 있도록 핵심 정보를 보존하면서 요약을 생성
-summarize_webpage_prompt = """당신은 웹 검색에서 가져온 웹페이지의 원시 콘텐츠를 요약하는 작업을 맡고 있습니다. 목표는 원본 웹페이지에서 가장 중요한 정보를 보존하는 요약을 만드는 것입니다. 이 요약은 하위 연구 에이전트가 사용할 것이므로 필수 정보를 잃지 않고 핵심 세부사항을 유지하는 것이 중요합니다.
-
-다음은 웹페이지의 원시 콘텐츠입니다:
+Here is the raw content from the webpage:
 
 <webpage_content>
 {webpage_content}
 </webpage_content>
 
-요약을 작성하기 위해 다음 지침을 따르세요:
+Follow these guidelines to create your summary:
 
-1. 웹페이지의 주요 주제나 목적을 식별하고 보존하세요.
-2. 콘텐츠 메시지의 핵심이 되는 주요 사실, 통계, 데이터 포인트를 유지하세요.
-3. 신뢰할 수 있는 출처나 전문가의 중요한 인용문을 보관하세요.
-4. 콘텐츠가 시간에 민감하거나 역사적인 경우 사건의 시간순서를 유지하세요.
-5. 목록이나 단계별 지침이 있는 경우 보존하세요.
-6. 콘텐츠를 이해하는 데 중요한 관련 날짜, 이름, 위치를 포함하세요.
-7. 핵심 메시지를 그대로 유지하면서 긴 설명을 요약하세요.
+1. Identify and preserve the main topic or purpose of the webpage.
+2. Retain key facts, statistics, data points that are core to the content's message.
+3. Keep important quotes from credible sources or experts.
+4. Maintain chronological order of events if the content is time-sensitive or historical.
+5. Preserve any lists or step-by-step instructions if present.
+6. Include relevant dates, names, locations that are important for understanding the content.
+7. Summarize lengthy explanations while maintaining their core message.
 
-다양한 유형의 콘텐츠를 처리할 때:
+When dealing with different types of content:
 
-- 뉴스 기사의 경우: 누가, 무엇을, 언제, 어디서, 왜, 어떻게에 집중하세요.
-- 과학적 콘텐츠의 경우: 방법론, 결과, 결론을 보존하세요.
-- 의견 기사의 경우: 주요 논증과 뒷받침하는 요점을 유지하세요.
-- 제품 페이지의 경우: 주요 기능, 사양, 고유한 판매 포인트를 보관하세요.
+- For news articles: Focus on who, what, when, where, why, and how.
+- For scientific content: Preserve methodology, results, and conclusions.
+- For opinion pieces: Maintain main arguments and supporting points.
+- For product pages: Keep key features, specifications, and unique selling points.
 
-요약은 원본 콘텐츠보다 상당히 짧아야 하지만 정보 소스로서 독립적으로 설 수 있을 만큼 포괄적이어야 합니다. 콘텐츠가 이미 간결하지 않은 한 원본 길이의 약 25-30%를 목표로 하세요.
+The summary should be significantly shorter than the original content but comprehensive enough to stand alone as an information source. Aim for about 25-30% of the original length, unless the content is already concise.
 
-다음 형식으로 요약을 제시하세요:
+Present your summary in the following format:
 
 ```
 {{
-   "summary": "필요에 따라 적절한 단락이나 글머리 기호로 구성된 요약",
-   "key_excerpts": "첫 번째 중요한 인용문이나 발췌문, 두 번째 중요한 인용문이나 발췌문, 세 번째 중요한 인용문이나 발췌문, ...필요에 따라 최대 5개까지 더 많은 발췌문 추가"
+   "summary": "Summary organized in appropriate paragraphs or bullet points as needed",
+   "key_excerpts": "First important quote or excerpt, Second important quote or excerpt, Third important quote or excerpt, ...up to 5 more excerpts as needed"
 }}
 ```
 
-다음은 좋은 요약의 두 가지 예시입니다:
+Here are two examples of good summaries:
 
-예시 1 (뉴스 기사의 경우):
+Example 1 (for a news article):
 ```json
 {{
-   "summary": "2023년 7월 15일, NASA는 케네디 우주센터에서 아르테미스 II 미션을 성공적으로 발사했습니다. 이는 1972년 아폴로 17호 이후 첫 번째 유인 달 미션입니다. 제인 스미스 사령관이 이끄는 4명의 승무원은 지구로 돌아오기 전에 10일 동안 달을 공전할 예정입니다. 이 미션은 2030년까지 달에 영구적인 인간 거주지를 설립하려는 NASA 계획의 중요한 단계입니다.",
-   "key_excerpts": "아르테미스 II는 우주 탐사의 새로운 시대를 나타낸다고 NASA 관리자 존 도가 말했습니다. 이 미션은 달에서의 미래 장기 체류를 위한 중요한 시스템을 테스트할 것이라고 수석 엔지니어 사라 존슨이 설명했습니다. 우리는 단순히 달로 돌아가는 것이 아니라 달로 나아가고 있다고 제인 스미스 사령관이 발사 전 기자회견에서 말했습니다."
+   "summary": "On July 15, 2023, NASA successfully launched the Artemis II mission from Kennedy Space Center. This marks the first crewed lunar mission since Apollo 17 in 1972. The four-person crew, led by Commander Jane Smith, will orbit the Moon for 10 days before returning to Earth. The mission is a critical step in NASA's plan to establish a permanent human presence on the Moon by 2030.",
+   "key_excerpts": "Artemis II represents a new era of space exploration, said NASA Administrator John Doe. The mission will test critical systems for future long-duration stays on the Moon, explained Lead Engineer Sarah Johnson. We're not just going back to the Moon, we're going forward to the Moon, said Commander Jane Smith during a pre-launch press conference."
 }}
 ```
 
-예시 2 (과학 기사의 경우):
+Example 2 (for a scientific article):
 ```json
 {{
-   "summary": "Nature Climate Change에 발표된 새로운 연구에 따르면 전 세계 해수면이 이전에 생각했던 것보다 빠르게 상승하고 있다고 밝혔습니다. 연구자들은 1993년부터 2022년까지의 위성 데이터를 분석한 결과 지난 30년 동안 해수면 상승률이 연간 0.08mm/년²씩 가속화되었다는 것을 발견했습니다. 이러한 가속화는 주로 그린란드와 남극의 빙상 융해에 기인합니다. 연구는 현재 추세가 계속된다면 2100년까지 전 세계 해수면이 최대 2미터까지 상승할 수 있어 전 세계 연안 지역사회에 심각한 위험을 초래할 것이라고 예측합니다.",
-   "key_excerpts": "우리의 연구 결과는 해수면 상승의 명확한 가속화를 나타내며, 이는 연안 계획 및 적응 전략에 중요한 의미를 갖는다고 주저자 에밀리 브라운 박사가 말했습니다. 그린란드와 남극의 빙상 융해율은 1990년대 이후 3배 증가했다고 연구는 보고합니다. 온실가스 배출량의 즉각적이고 실질적인 감소 없이는 금세기 말까지 잠재적으로 재앙적인 해수면 상승을 보게 될 것이라고 공동 저자 마이클 그린 교수가 경고했습니다."
+   "summary": "A new study published in Nature Climate Change reveals that global sea levels are rising faster than previously thought. Researchers analyzed satellite data from 1993 to 2022 and found that sea level rise has been accelerating at a rate of 0.08mm/year² over the past 30 years. This acceleration is primarily attributed to ice sheet melting in Greenland and Antarctica. The study predicts that if current trends continue, global sea levels could rise by up to 2 meters by 2100, posing serious risks to coastal communities worldwide.",
+   "key_excerpts": "Our findings show a clear acceleration in sea level rise, which has important implications for coastal planning and adaptation strategies, said lead author Dr. Emily Brown. The rate of ice sheet melting in Greenland and Antarctica has tripled since the 1990s, the study reports. Without immediate and substantial reductions in greenhouse gas emissions, we will see potentially catastrophic sea level rise by the end of the century, warned co-author Professor Michael Green."
 }}
 ```
 
-목표는 원본 웹페이지에서 가장 중요한 정보를 보존하면서 하위 연구 에이전트가 쉽게 이해하고 활용할 수 있는 요약을 만드는 것임을 기억하세요.
+Remember, the goal is to create a summary that preserves the most important information from the original webpage while being easily understood and utilized by a sub-research agent.
 
-오늘 날짜: {date}
+Today's date: {date}
 """
